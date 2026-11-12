@@ -103,7 +103,7 @@ jobs:
         working-directory: source
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.RELEASE_VERSION }}
-        run: uv build --no-sources --package a2ui-agent-sdk --out-dir ../dist
+        run: uv build --no-sources --no-create-gitignore --package a2ui-agent-sdk --out-dir ../dist
 
       - name: Verify payloads and record source provenance
         env:
