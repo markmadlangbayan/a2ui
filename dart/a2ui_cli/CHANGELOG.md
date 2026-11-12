@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.0-haven.1
+
+This is a fork prerelease, not an official upstream release.
+
 - **Breaking:** `EnumType.values` now preserves JSON scalar types as
   `List<Object?>` rather than converting every value to a string. Python builders
   accept integer and boolean enum literals and reject string substitutes and
