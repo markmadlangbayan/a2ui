@@ -65,6 +65,11 @@ See [npm.md](npm.md).
 
 ### PyPI
 
+For the temporary SDK repair distributed only through the
+`markmadlangbayan/a2ui` fork's GitHub releases, use the separate
+[fork-only Python SDK backport workflow](fork-python-sdk.md). The PyPI workflow
+below is upstream-only, including its dry run.
+
 The Python packages are `a2ui-core`, `a2ui-agent-sdk`, and the agent framework integrations `a2ui-a2a` and `a2ui-adk`. Releasing one or more of them is performed by providing a prompt to an AI assistant within the `a2ui` project directory.
 
 ```text
