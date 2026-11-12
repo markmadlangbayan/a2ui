@@ -31,7 +31,12 @@ VERSION = "0.11.0+haven.1"
 PACKAGE = "python/a2ui_agent"
 MODEL = f"{PACKAGE}/src/a2ui/builder/core/base_model.py"
 REGRESSION = f"{PACKAGE}/tests/test_builder_null_serialization.py"
-ALLOWED = {MODEL, REGRESSION, f"{PACKAGE}/README.md", f"{PACKAGE}/CHANGELOG.md"}
+ALLOWED = {
+    MODEL,
+    REGRESSION,
+    f"{PACKAGE}/src/a2ui/builder/README.md",
+    f"{PACKAGE}/CHANGELOG.md",
+}
 STEM = f"a2ui_agent_sdk-{VERSION}"
 DIST_INFO = f"{STEM}.dist-info"
 WHEEL = f"{STEM}-py3-none-any.whl"

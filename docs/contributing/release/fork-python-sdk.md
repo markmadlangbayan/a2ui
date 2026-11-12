@@ -17,8 +17,10 @@ The [source gate](../../../.github/scripts/fork_sdk_release.py) requires a full
 40-character lowercase commit SHA descended from that exact base. It requires
 changes to both `python/a2ui_agent/src/a2ui/builder/core/base_model.py` and
 `python/a2ui_agent/tests/test_builder_null_serialization.py`. Only those files and
-the SDK's `README.md` and `CHANGELOG.md` may differ. Metadata and core changes are
-rejected. The source does not need to be merged into `main`.
+`python/a2ui_agent/src/a2ui/builder/README.md` and
+`python/a2ui_agent/CHANGELOG.md` may differ. The package-root `README.md`,
+metadata, and core changes are rejected. The source does not need to be merged
+into `main`.
 
 Run the full SDK test suite on the reviewed backport before approving publication.
 The workflow runs only the backport's null-serialization regression file against
