@@ -1,0 +1,201 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Release fork Python SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Reviewed backport commit (full lowercase 40-hex SHA)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and test artifacts without creating a tag or release"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-fork-python-sdk-0.11.0-haven.1
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPOSITORY: markmadlangbayan/a2ui
+  RELEASE_VERSION: 0.11.0+haven.1
+  RELEASE_TAG: python/a2ui-agent-sdk/v0.11.0+haven.1
+  SOURCE_SHA: ${{ inputs.source_sha }}
+
+jobs:
+  build:
+    if: github.repository == 'markmadlangbayan/a2ui' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate immutable input before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::source_sha must be a full lowercase 40-hex commit"
+            exit 1
+          }
+
+      - name: Check out reviewed release controls
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate source ancestry and bounded diff without executing it
+        run: |
+          set -euo pipefail
+          git -C control fetch --no-tags origin "$SOURCE_SHA"
+          python3 control/.github/scripts/fork_sdk_release.py source \
+            --repository control --source-sha "$SOURCE_SHA"
+
+      - name: Refuse existing release or tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          refs=$(gh api "repos/$RELEASE_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG" --jq length)
+          releases=$(gh api --paginate "repos/$RELEASE_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")
+          test "$refs" = 0 && test -z "$releases"
+
+      - name: Check out only the validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.12.1"
+          enable-cache: false
+
+      - name: Test release controls
+        run: python -m unittest discover -s control/.github/scripts/tests -p test_fork_sdk_release.py
+
+      - name: Build only the SDK through hatch-vcs
+        working-directory: source
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.RELEASE_VERSION }}
+        run: uv build --no-sources --package a2ui-agent-sdk --out-dir ../dist
+
+      - name: Verify payloads and record source provenance
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          python control/.github/scripts/fork_sdk_release.py artifacts \
+            --repository control --source-sha "$SOURCE_SHA" --dist dist \
+            --workflow-sha "$WORKFLOW_SHA" --run-url "$RUN_URL"
+
+      - name: Test installed wheel against published dependencies
+        run: |
+          set -euo pipefail
+          python -m venv wheel-env
+          wheel-env/bin/python -m pip install --index-url https://pypi.org/simple \
+            "dist/a2ui_agent_sdk-${RELEASE_VERSION}-py3-none-any.whl" \
+            "a2ui-core==0.6.0" "pydantic==2.13.5" "pytest==9.1.1"
+          wheel-env/bin/python -m pip check
+          mkdir smoke
+          cp source/python/a2ui_agent/tests/test_builder_null_serialization.py smoke/
+          cd smoke
+          ../wheel-env/bin/python -I -c \
+            'from importlib.metadata import version; assert version("a2ui-agent-sdk") == "0.11.0+haven.1"; assert version("a2ui-core") == "0.6.0"; assert version("pydantic") == "2.13.5"'
+          ../wheel-env/bin/python -I -m pytest -c /dev/null --noconftest \
+            --import-mode=importlib --junitxml=results.xml -q test_builder_null_serialization.py
+          python -c 'import xml.etree.ElementTree as ET; suites = ET.parse("results.xml").getroot().findall("testsuite"); assert sum(int(s.get("tests", 0)) for s in suites) > 0; assert all(int(s.get("skipped", 0)) == 0 for s in suites)'
+          ../wheel-env/bin/python -m pip list --format=freeze > ../dist/installed-dependencies.txt
+          cd ../dist
+          sha256sum installed-dependencies.txt >> checksums.txt
+
+      - name: Upload verified artifacts (also in dry runs)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fork-python-sdk
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.repository == 'markmadlangbayan/a2ui' && github.ref == 'refs/heads/main' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      # This job never checks out or executes the SDK source.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fork-python-sdk
+          path: release-assets
+
+      - name: Verify checksums and source binding
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum --strict --check checksums.txt
+          jq -e --arg sha "$SOURCE_SHA" --arg version "$RELEASE_VERSION" \
+            --arg repo "$RELEASE_REPOSITORY" \
+            '.source_sha == $sha and .version == $version and .repository == $repo
+            and .base_sha == "3295e67b5f4820639aa88c578a64af2196d0b752"' source-manifest.json
+
+      - name: Attest artifacts and source manifest
+        id: provenance
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: release-assets/*
+
+      - name: Publish fork-only prerelease without overwriting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$BUNDLE" release-assets/provenance.jsonl
+          cat > release-notes.md <<EOF
+          Temporary fork-only a2ui-agent-sdk ${RELEASE_VERSION} backport.
+
+          Source: ${SOURCE_SHA}
+          Base: 3295e67b5f4820639aa88c578a64af2196d0b752 (SDK 0.11.0).
+          Published a2ui-core 0.6.0 is unchanged. Tested with Python 3.13 and Pydantic 2.13.5.
+          GitHub assets only; this is not an upstream or PyPI release.
+
+          source-manifest.json binds the artifacts to the backport. The attestation
+          identifies the separate main-branch release workflow and covers that manifest.
+          EOF
+          # Creating the ref fails atomically if it already exists, including on retries.
+          gh api "repos/$RELEASE_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$SOURCE_SHA"
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --repo "$RELEASE_REPOSITORY" --verify-tag --prerelease --latest=false \
+            --title "Fork-only a2ui-agent-sdk ${RELEASE_VERSION}" \
+            --notes-file release-notes.md
