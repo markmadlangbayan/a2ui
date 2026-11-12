@@ -74,6 +74,23 @@ class ReleaseGateTest(unittest.TestCase):
             {release.MODEL, release.REGRESSION},
         )
 
+    def test_accepts_reviewed_builder_documentation(self) -> None:
+        path = "python/a2ui_agent/src/a2ui/builder/README.md"
+        self.write(path, "Required null fields survive flattening.\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "document repair")
+        self.assertEqual(
+            set(release.validate_source(self.root, self.git("rev-parse", "HEAD"))),
+            {release.MODEL, release.REGRESSION, path},
+        )
+
+    def test_rejects_unreviewed_package_documentation(self) -> None:
+        self.write("python/a2ui_agent/README.md", "Unrelated package change.\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "unrelated documentation")
+        with self.assertRaisesRegex(ValueError, "outside"):
+            release.validate_source(self.root, self.git("rev-parse", "HEAD"))
+
     def test_rejects_symbolic_or_abbreviated_revision(self) -> None:
         for revision in ["HEAD", self.sha[:12], "-" + self.sha, self.sha + "\n"]:
             with self.subTest(revision=revision), self.assertRaises(ValueError):
